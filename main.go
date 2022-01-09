@@ -16,13 +16,15 @@ var (
 )
 
 const usage = `version: %s
-Usage: %[2]s [-v] [-h] <PATH>
+Usage: %[2]s [-v] [-h] [-d] <PATH>
 Options:
     -h        help
     -v        show version and exit
+    -d        dry-run prints file names with found words
 Examples:
     %[2]s .
     %[2]s /home/user/go/src/github.com/username/repo
+	%[2]s -d /home/user/go/src/github.com/username/repo
 `
 
 var erroneousWords = [][]byte{
@@ -37,6 +39,7 @@ const properName = "Go"
 
 func main() {
 	var vers bool
+	var dryRun string
 
 	flag.Usage = func() {
 		w := os.Stderr
@@ -50,6 +53,7 @@ func main() {
 	}
 
 	flag.BoolVar(&vers, "v", false, "")
+	flag.StringVar(&dryRun, "d", "", "")
 	flag.Parse()
 
 	if vers {
@@ -57,36 +61,47 @@ func main() {
 		return
 	}
 
-	if len(os.Args) != 2 {
-		fmt.Fprintf(os.Stderr, usage, version, name)
-		os.Exit(1)
+	var path string
+	if dryRun != "" {
+		path = dryRun
+	} else {
+		path = os.Args[1]
 	}
 
-	if _, err := os.Stat(os.Args[1]); os.IsNotExist(err) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 
-	err := filepath.Walk(os.Args[1], func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if strings.HasSuffix(path, ".md") {
-			fmt.Printf("found: %s\n", path)
-
-			b, err := os.ReadFile(path)
+		if strings.HasSuffix(p, ".md") {
+			b, err := os.ReadFile(p)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
 
 			for _, ew := range erroneousWords {
-				b = bytes.Replace(b, ew, []byte(properName), -1)
-			}
+				if dryRun != "" {
+					if bytes.Contains(b, ew) {
+						fmt.Printf("%s in %s\n", string(ew), p)
+					}
+					continue
+				}
 
-			if err = os.WriteFile(path, b, info.Mode()); err != nil {
-				fmt.Println(err)
-				os.Exit(1)
+				b = bytes.Replace(b, ew, []byte(properName), -1)
+				if err = os.WriteFile(p, b, info.Mode()); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+
+				if err = os.WriteFile(p, b, info.Mode()); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
 			}
 		}
 		return nil
